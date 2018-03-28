@@ -192,7 +192,7 @@ class HeuristicAgent2(Agent):
 
 class RaymanAgent(Agent):
     def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=75,
-                 turning_distance=60, display=False, **kwargs):
+                 turning_distance=50, display=False, **kwargs):
         super(RaymanAgent, self).__init__(name, server, room, **kwargs)
         assert patch_size // 2 != patch_size / 2, "Patch size must be odd"
         self.patch_size = patch_size
@@ -209,12 +209,34 @@ class RaymanAgent(Agent):
                 action = self.action(state, action)
                 state, reward, episode_over = self.env.step(action)
     
+    def in_a_channel(ray_len):
+        if (ray_len['W'] < self.turning_distance
+            and ray_len['E'] < self.turning_distance
+            and ray_len['NW'] < self.turning_distance
+            and ray_len['NE'] < self.turning_distance):
+            return True
+        else:
+            return False
+                
     def action(self, state, curr_action):
         patch = self.extract_patch(state, self.patch_size)
         ray_len = get_ray_lengths(patch, ray_conf=self.ray_conf, 
                                   start_allowance=2, max_len=self.patch_size)
         
-        if ray_len['N'] <= self.turning_distance:  # Something is ahead
+        if ray_len['N'] > self.turning_distance: # Nothing ahead
+            # If you're in a channel and you've found a straight path
+            # it means you've found a gap and you should go straight!
+            choice = 1
+            # however, if you've not just been in a channel, you should
+            # 'look for space'. 
+            # TODO: Implement 'took for space' later.
+        else:  # Something is ahead
+            if self.in_a_channel(ray_len):
+                # Wiggle head to look for gaps
+                if ray_len['NW'] > ray_len['NE']:
+                    choice = 0
+                else:
+                    choice = 2
             if ray_len['NW'] == ray_len['NE']:
                 if ray_len['SW'] == ray_len['SE']:
                     if curr_action == 1:
@@ -229,8 +251,7 @@ class RaymanAgent(Agent):
                 choice = 0
             else:
                 choice = 2
-        else:  # Nothing ahead
-            choice = 1
+        else:  
             
         if self.display:  # and closest_right == closest_left == 1:
             for row in patch:
