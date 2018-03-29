@@ -22,6 +22,15 @@ DIRECTION = {
     'W':  np.array(( 0,-1)),
     'NW': np.array((-1,-1))
 }
+COMPASS_TURN = {
+    'N':  1,
+    'NE': 2,
+    'E':  2,
+    'SE': 2,
+    'SW': 0,
+    'W':  0,
+    'NW': 0
+}
 
          
 def is_blocked(patch):
@@ -40,8 +49,8 @@ def is_blocked(patch):
 def configure_compass_rays(patch_size):
     if patch_size & 1:  # if patch size is odd
         idx = (patch_size-1) // 2
-        start = np.array(((idx,idx),) * 8)
-        direc = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+        start = np.array(((idx,idx),) * 7)
+        direc = ['N', 'NE', 'E', 'SE', 'SW', 'W', 'NW']
         directions = [DIRECTION[dd] for dd in direc]
         ray_conf = dict(zip(direc, zip(start, directions)))
     else:
@@ -195,14 +204,131 @@ class HeuristicAgent2(Agent):
 
 
 class RaymanAgent(Agent):
-    def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=75,
-                 turning_distance=50, display=False, **kwargs):
+    def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=81,
+                 turning_distance=30, display=False, **kwargs):
         super(RaymanAgent, self).__init__(name, server, room, **kwargs)
         assert patch_size // 2 != patch_size / 2, "Patch size must be odd"
         self.patch_size = patch_size
         self.turning_distance = turning_distance
         self.display = display
         self.ray_conf = configure_compass_rays(patch_size)
+        self.rays = {}
+        self.patch = None
+        sz = self.patch_size // 2
+        self.sq_dist = np.arange(sz)**2 + np.arange(sz-2)[:, np.newaxis]**2
+        self.in_uturn = False
+        self.action_message = 'Begin'
+    
+    def run(self):
+        while True:
+            state = self.env.reset()
+            episode_over = False
+            self.in_uturn = False
+            action = 0
+            action_log = []
+            while not episode_over:
+                action = self.action(state, action)
+                state, reward, episode_over = self.env.step(action)
+                action_log += [(action, self.action_message, self.rays)]
+                if self.display:
+                    for row in self.patch:
+                        print(' '.join([DISPLAY_DICT[i] for i in row]))
+                    print("mode: {} || move: {} || {}".format(self.rays, 
+                          action, self.action_message))
+                    print("\033[{}A".format(self.patch_size+1), end='\r')
+                    if not self.env.client.player_alive:
+                        print('\n'.join([str(ll) for ll in action_log[-10:]]))
+        
+    def action(self, state, curr_action):
+        # Binarize the state
+        state.pixels = (state.pixels != self.env.client.bg_color).all(axis=2)
+        self.patch = self.extract_patch(state, self.patch_size)
+        self.rays = get_ray_lengths(self.patch, ray_conf=self.ray_conf, 
+                                    start_allowance=3, max_len=self.patch_size)
+        if self.rays['N'] > self.turning_distance + 5:  # extra space to catch a trap
+            self.action_message = 'SPACE AHEAD'
+            self.in_uturn = False
+            return 1            
+        space_to_uturn = [self.rays[k1] > self.turning_distance
+                          and self.rays[k2] > self.turning_distance - 5
+                          for k1, k2 in zip(['W', 'E'], ['NW', 'NE'])]
+        if not any(space_to_uturn):  # and blockage ahead
+            self.in_uturn = False
+            min_dist = 5**2
+            sz = self.patch_size // 2
+            left, right = self.patch[:sz-2, :sz], self.patch[:sz-2, sz+1:]
+            left[0, 0] = right[0, -1] = 1  # hack to handle empty box
+            left_dist = self.sq_dist[::-1, ::-1] * left
+            right_dist = self.sq_dist[::-1, :] * right
+            closest_left = np.min(left_dist[left_dist > 0])
+            closest_right = np.min(right_dist[right_dist > 0])
+            
+            # go towards closest side to make uturn space
+            if closest_left > min_dist:
+                if closest_right > min_dist:
+                    if closest_left < closest_right:
+                        self.action_message = 'LEFT CLOSER'
+                        return 2
+                    else:
+                        self.action_message = 'RIGHT CLOSER'
+                        return 0
+                else:
+                    self.action_message = 'TURN AWAY LEFT'
+                    return 0
+            else:
+                self.action_message = 'TURN AWAY RIGHT'
+                return 2
+        if all(space_to_uturn):  # check which way preferable
+            if self.in_uturn:
+                self.action_message = 'CONTINUE UTURN'
+                return curr_action
+            if self.rays['SW'] > self.rays['SE']:
+                self.action_message = 'CHOICE: UTURN LEFT'
+                self.in_uturn = True
+                return 0
+            else:
+                self.action_message = 'CHOICE: UTURN RIGHT'
+                self.in_uturn = True
+                return 2
+        else:  # uturn the way with space!
+            self.action_message = 'UTURN LEFT' if space_to_uturn[0] else 'UTURN RIGHT'
+            self.in_uturn = True
+            if space_to_uturn[0]:
+                return 0
+            else:
+                return 2
+        
+#        max_front_dist = max(self.rays[kk] for kk in ['NW', 'N', 'NE'])
+#        
+#        return max(max_rays, key=max_rays.count)
+#        if max_dist:
+#        max_rays = [COMPASS_TURN[k] for k, v in self.rays.items() 
+#                    if v == max_dist]
+#        if len(max_rays) == 1:
+#            return max_rays.pop()
+#        else:
+#            if 1 in max_rays:
+#                return 1
+#            elif curr_action in max_rays:
+#                return curr_action
+#            else:
+#                # maybe need to handle 'flip flopping'
+#                return np.random.choice(list(max_rays))
+                
+        
+        
+        
+
+class ComplicatedAgent(Agent):
+    def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=101,
+                 turning_distance=30, display=False, **kwargs):
+        super(ComplicatedAgent, self).__init__(name, server, room, **kwargs)
+        assert patch_size // 2 != patch_size / 2, "Patch size must be odd"
+        self.patch_size = patch_size
+        self.turning_distance = turning_distance
+        self.display = display
+        self.ray_conf = configure_compass_rays(patch_size)
+        self.mode = 'free'
     
     def run(self):
         while True:
@@ -212,30 +338,82 @@ class RaymanAgent(Agent):
             while not episode_over:
                 action = self.action(state, action)
                 state, reward, episode_over = self.env.step(action)
+                if self.display:
+                    for row in self.patch:
+                        print(' '.join([DISPLAY_DICT[i] for i in row]))
+                    print("mode: {} || move: {}".format(self.rays, action))
+                    print("\033[{}A".format(self.patch_size+1), end='\r')
     
-    def in_a_channel(ray_len):
+    def check_channel(self, ray_len):
         if (ray_len['W'] < self.turning_distance
             and ray_len['E'] < self.turning_distance
             and ray_len['NW'] < self.turning_distance
             and ray_len['NE'] < self.turning_distance):
-            return True
+            if ray_len['E'] + ray_len['W'] > self.turning_distance:
+                return 'wide'
+            else:
+                return 'narrow'
         else:
             return False
-                
+    
+    def get_mode(self, ray_len, patch, pixels, loc):
+        if (ray_len['N'] > self.turning_distance
+                and ray_len['NE'] > self.turning_distance
+                and ray_len['E'] > self.turning_distance
+                and ray_len['NW'] > self.turning_distance
+                and ray_len['W'] > self.turning_distance):
+            self.mode = 'free'
+            return
+        channel_type = self.check_channel(ray_len)
+        if self.mode == 'in_narrow_channel':
+            
+            # Hug a wall and Look for gaps
+            # If you're in a channel and you've found a straight path
+            # it means you've found a gap and you should go straight!
+            return
+        if self.mode == 'in_wide_channel':
+            return
+        
+            
     def action(self, state, curr_action):
         state.pixels = np.clip(abs(state.pixels - self.env.client.bg_color[0]).sum(axis=2), 0, 1)
         patch = self.extract_patch(state, self.patch_size)
         ray_len = get_ray_lengths(patch, ray_conf=self.ray_conf, 
                                   start_allowance=2, max_len=self.patch_size)
         
-        if ray_len['N'] > self.turning_distance: # Nothing ahead
+        self.get_mode(ray_len, patch, state.pixels)
+        if self.mode == 'free':
+            # if 'free' you should 'look for space'...
+            # TODO: Implement 'look for space'
+            # For now, just go straight!
+            return 1
+        if self.mode == 'head_on_block':
+            if curr_action == 1:
+                choice = np.random.choice([0, 2])
+            else:
+                choice = curr_action
+        if self.mode == 'in_narrow_channel':
+            # Hug a wall and Look for gaps
             # If you're in a channel and you've found a straight path
             # it means you've found a gap and you should go straight!
+            return
+        if self.mode == 'in_wide_channel':
+            return
+            
+        elif self.mode == 'found_gap_on_right':
             choice = 1
-            # however, if you've not just been in a channel, you should
-            # 'look for space'. 
-            # TODO: Implement 'took for space' later.
-        else:  # Something is ahead
+        elif self.mode == 'found_gap_on_left':
+            choice = 0
+        elif self.mode == 'turning_for_gap':
+            choice = curr_action
+        elif self.mode == 'going_through_gap':
+            choice = 1
+        if ray_len['N'] > self.turning_distance: # Nothing ahead
+            choice = 1
+        else:  # Something is close ahead
+            # options:
+            #    * In a channel => wiggle left and right to find gap
+            #    * 
             if self.in_a_channel(ray_len):
                 # Wiggle head to look for gaps
                 if ray_len['NW'] > ray_len['NE']:
@@ -256,20 +434,14 @@ class RaymanAgent(Agent):
                 choice = 0
             else:
                 choice = 2
-        else:  
             
-        if self.display:  # and closest_right == closest_left == 1:
-            for row in patch:
-                print(' '.join([DISPLAY_DICT[i] for i in row]))
-            print("rays: {} || move: {}".format(ray_len, choice))
-            print("\033[{}A".format(self.patch_size+1), end='\r')
-        return choice
+      
 
 
 if __name__ == '__main__':
     serveraddress = '129.215.91.49:8080'  # James' comp
 #    serveraddress = "127.0.0.1:8080"  # Ryan's setting
-#    serveraddress = "curvytron.com"  # Online
+#    serveraddress = "www.curvytron.com:80"  # Online
     room = DEFAULT_ROOM
     
     print('server: {} room: room_{}'.format(serveraddress, room))
@@ -278,7 +450,11 @@ if __name__ == '__main__':
 #    agent = RaymanAgent('RaymanAgent', server=serveraddress, room=room, 
 #                           display=True)
     opponents = [HeuristicAgent1('HeuristicAgent1', serveraddress, room),
-                 HeuristicAgent2('HeuristicAgent2', serveraddress, room)]
+                 HeuristicAgent2('HeuristicAgent2', serveraddress, room),
+                 HeuristicAgent2('HeuristicAgent2_wide', serveraddress, room,
+                                 patch_size=100),
+                 HeuristicAgent2('HeuristicAgent2_narrow', serveraddress, room,
+                                 patch_size=30)]
 
     agent.start()
     for op in opponents:
