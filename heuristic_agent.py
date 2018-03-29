@@ -205,7 +205,7 @@ class HeuristicAgent2(Agent):
 
 class RaymanAgent(Agent):
     def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=81,
-                 turning_distance=30, display=False, **kwargs):
+                 turning_distance=35, display=False, **kwargs):
         super(RaymanAgent, self).__init__(name, server, room, **kwargs)
         assert patch_size // 2 != patch_size / 2, "Patch size must be odd"
         self.patch_size = patch_size
@@ -301,28 +301,26 @@ class RaymanAgent(Agent):
 
 
 if __name__ == '__main__':
-    serveraddress = '129.215.91.49:8080'  # James' comp
+#    serveraddress = '129.215.91.49:8080'  # James' comp
 #    serveraddress = "127.0.0.1:8080"  # Ryan's setting
-#    serveraddress = "www.curvytron.com:80"  # Online
-    room = DEFAULT_ROOM
+    serveraddress = "www.curvytron.com:80"  # Online
+    room = "THE BOT ROOM"
     
     print('server: {} room: room_{}'.format(serveraddress, room))
 
-    agent = RaymanAgent('Rayman', serveraddress, room, display=True)
+    agent = RaymanAgent('Rayman', serveraddress, room, display=False)
 #    agent = RaymanAgent('RaymanAgent', server=serveraddress, room=room, 
 #                           display=True)
     opponents = [HeuristicAgent1('HeuristicAgent1', serveraddress, room,
-                                 patch_size=50),
-                 HeuristicAgent2('HeuristicAgent2_50', serveraddress, room,
-                                 patch_size=50),
+                                 patch_size=60),
+                 HeuristicAgent2('HeuristicAgent2_60', serveraddress, room,
+                                 patch_size=60),
                  HeuristicAgent2('HeuristicAgent2_100', serveraddress, room,
-                                 patch_size=100),
-                 HeuristicAgent2('HeuristicAgent2_20', serveraddress, room,
-                                 patch_size=20)]
+                                 patch_size=100)]
 
     agent.start()
     for op in opponents:
         op.start()
 
     while True:
-        time.sleep(1)
+        time.sleep(5)
