@@ -306,7 +306,7 @@ if __name__ == '__main__':
     serveraddress = "www.curvytron.com:80"  # Online
     room = "THE BOT ROOM"
     
-    print('server: {} room: room_{}'.format(serveraddress, room))
+    print('server: {} room: {}'.format(serveraddress, room))
 
     agent = RaymanAgent('Rayman', serveraddress, room, display=False)
 #    agent = RaymanAgent('RaymanAgent', server=serveraddress, room=room, 
