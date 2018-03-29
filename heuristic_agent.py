@@ -297,144 +297,6 @@ class RaymanAgent(Agent):
                 return 0
             else:
                 return 2
-        
-#        max_front_dist = max(self.rays[kk] for kk in ['NW', 'N', 'NE'])
-#        
-#        return max(max_rays, key=max_rays.count)
-#        if max_dist:
-#        max_rays = [COMPASS_TURN[k] for k, v in self.rays.items() 
-#                    if v == max_dist]
-#        if len(max_rays) == 1:
-#            return max_rays.pop()
-#        else:
-#            if 1 in max_rays:
-#                return 1
-#            elif curr_action in max_rays:
-#                return curr_action
-#            else:
-#                # maybe need to handle 'flip flopping'
-#                return np.random.choice(list(max_rays))
-                
-        
-        
-        
-
-class ComplicatedAgent(Agent):
-    def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=101,
-                 turning_distance=30, display=False, **kwargs):
-        super(ComplicatedAgent, self).__init__(name, server, room, **kwargs)
-        assert patch_size // 2 != patch_size / 2, "Patch size must be odd"
-        self.patch_size = patch_size
-        self.turning_distance = turning_distance
-        self.display = display
-        self.ray_conf = configure_compass_rays(patch_size)
-        self.mode = 'free'
-    
-    def run(self):
-        while True:
-            state = self.env.reset()
-            episode_over = False
-            action = 1
-            while not episode_over:
-                action = self.action(state, action)
-                state, reward, episode_over = self.env.step(action)
-                if self.display:
-                    for row in self.patch:
-                        print(' '.join([DISPLAY_DICT[i] for i in row]))
-                    print("mode: {} || move: {}".format(self.rays, action))
-                    print("\033[{}A".format(self.patch_size+1), end='\r')
-    
-    def check_channel(self, ray_len):
-        if (ray_len['W'] < self.turning_distance
-            and ray_len['E'] < self.turning_distance
-            and ray_len['NW'] < self.turning_distance
-            and ray_len['NE'] < self.turning_distance):
-            if ray_len['E'] + ray_len['W'] > self.turning_distance:
-                return 'wide'
-            else:
-                return 'narrow'
-        else:
-            return False
-    
-    def get_mode(self, ray_len, patch, pixels, loc):
-        if (ray_len['N'] > self.turning_distance
-                and ray_len['NE'] > self.turning_distance
-                and ray_len['E'] > self.turning_distance
-                and ray_len['NW'] > self.turning_distance
-                and ray_len['W'] > self.turning_distance):
-            self.mode = 'free'
-            return
-        channel_type = self.check_channel(ray_len)
-        if self.mode == 'in_narrow_channel':
-            
-            # Hug a wall and Look for gaps
-            # If you're in a channel and you've found a straight path
-            # it means you've found a gap and you should go straight!
-            return
-        if self.mode == 'in_wide_channel':
-            return
-        
-            
-    def action(self, state, curr_action):
-        state.pixels = np.clip(abs(state.pixels - self.env.client.bg_color[0]).sum(axis=2), 0, 1)
-        patch = self.extract_patch(state, self.patch_size)
-        ray_len = get_ray_lengths(patch, ray_conf=self.ray_conf, 
-                                  start_allowance=2, max_len=self.patch_size)
-        
-        self.get_mode(ray_len, patch, state.pixels)
-        if self.mode == 'free':
-            # if 'free' you should 'look for space'...
-            # TODO: Implement 'look for space'
-            # For now, just go straight!
-            return 1
-        if self.mode == 'head_on_block':
-            if curr_action == 1:
-                choice = np.random.choice([0, 2])
-            else:
-                choice = curr_action
-        if self.mode == 'in_narrow_channel':
-            # Hug a wall and Look for gaps
-            # If you're in a channel and you've found a straight path
-            # it means you've found a gap and you should go straight!
-            return
-        if self.mode == 'in_wide_channel':
-            return
-            
-        elif self.mode == 'found_gap_on_right':
-            choice = 1
-        elif self.mode == 'found_gap_on_left':
-            choice = 0
-        elif self.mode == 'turning_for_gap':
-            choice = curr_action
-        elif self.mode == 'going_through_gap':
-            choice = 1
-        if ray_len['N'] > self.turning_distance: # Nothing ahead
-            choice = 1
-        else:  # Something is close ahead
-            # options:
-            #    * In a channel => wiggle left and right to find gap
-            #    * 
-            if self.in_a_channel(ray_len):
-                # Wiggle head to look for gaps
-                if ray_len['NW'] > ray_len['NE']:
-                    choice = 0
-                else:
-                    choice = 2
-            if ray_len['NW'] == ray_len['NE']:
-                if ray_len['SW'] == ray_len['SE']:
-                    if curr_action == 1:
-                        choice = 0  # Arbitrary
-                    else:
-                        choice = curr_action  # keep going same way
-                elif ray_len['SW'] > ray_len['SE']:
-                    choice = 0
-                else:
-                    choice = 2
-            elif ray_len['NW'] > ray_len['NE']:
-                choice = 0
-            else:
-                choice = 2
-            
       
 
 
@@ -449,12 +311,14 @@ if __name__ == '__main__':
     agent = RaymanAgent('Rayman', serveraddress, room, display=True)
 #    agent = RaymanAgent('RaymanAgent', server=serveraddress, room=room, 
 #                           display=True)
-    opponents = [HeuristicAgent1('HeuristicAgent1', serveraddress, room),
-                 HeuristicAgent2('HeuristicAgent2', serveraddress, room),
-                 HeuristicAgent2('HeuristicAgent2_wide', serveraddress, room,
+    opponents = [HeuristicAgent1('HeuristicAgent1', serveraddress, room,
+                                 patch_size=50),
+                 HeuristicAgent2('HeuristicAgent2_50', serveraddress, room,
+                                 patch_size=50),
+                 HeuristicAgent2('HeuristicAgent2_100', serveraddress, room,
                                  patch_size=100),
-                 HeuristicAgent2('HeuristicAgent2_narrow', serveraddress, room,
-                                 patch_size=30)]
+                 HeuristicAgent2('HeuristicAgent2_20', serveraddress, room,
+                                 patch_size=20)]
 
     agent.start()
     for op in opponents:
