@@ -50,7 +50,7 @@ def configure_compass_rays(patch_size):
     if patch_size & 1:  # if patch size is odd
         idx = (patch_size-1) // 2
         start = np.array(((idx,idx),) * 7)
-        direc = ['N', 'NE', 'E', 'SE', 'SW', 'W', 'NW']
+        direc = ['SW', 'W', 'NW', 'N', 'NE', 'E', 'SE']
         directions = [DIRECTION[dd] for dd in direc]
         ray_conf = dict(zip(direc, zip(start, directions)))
     else:
@@ -80,6 +80,7 @@ def get_ray_lengths(patch, ray_conf=None, start_allowance=1, max_len=100):
     perpendicular to a diagonal ray (the ray will think it can pass straight
     through)
     """
+    # TODO: Implement ray width (use 3 as standard)
     if ray_conf is None:
         ray_conf = configure_compass_rays(patch.shape[0])
     ray_len = {}
@@ -297,26 +298,109 @@ class RaymanAgent(Agent):
                 return 0
             else:
                 return 2
-      
+
+
+class SimpleRaymanAgent(Agent):
+    def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=199,
+                 turning_distance=10, display=False, display_patch=None,
+                 **kwargs):
+        super(SimpleRaymanAgent, self).__init__(name, server, room, **kwargs)
+        assert patch_size // 2 != patch_size / 2, "Patch size must be odd"
+        self.patch_size = patch_size
+        self.turning_distance = turning_distance
+        self.display = display
+        if display_patch is None:
+            self.display_patch = display
+        else:    
+            self.display_patch = display_patch
+        self.ray_conf = configure_compass_rays(patch_size)
+        self.rays = {}
+        self.patch = None
+    
+    def run(self):
+        while True:
+            state = self.env.reset()
+            episode_over = False
+            action = 0
+            action_log = []
+            while not episode_over:
+                prev_action = action
+                action = self.action(state, prev_action)
+                if abs(action - prev_action) == 2:
+                    action = prev_action  # wobble control!
+                state, reward, episode_over = self.env.step(action)
+                self.rays = {k: np.round(v, 2) for k, v in self.rays.items()}
+                action_log += [(action, self.action_message, self.rays)]
+                if self.display:
+                    cursor_back = 1
+                    if self.display_patch:
+                        cursor_back += self.patch_size
+                        for row in self.patch:
+                            print(' '.join([DISPLAY_DICT[i] for i in row]))
+                    print("mode: {} || move: {} || {}".format(self.rays, 
+                          action, self.action_message, end='\r'))
+                    print("\033[{}A".format(cursor_back), end='\r')
+                    if not self.env.client.player_alive:
+                        print('\n'.join([str(ll) for ll in action_log[-10:]]),
+                              end='\r')
+                        print("\033[{}A".format(10), end='\r')
+        
+    def action(self, state, curr_action):
+        # Binarize the state
+        state.pixels = (state.pixels != self.env.client.bg_color).all(axis=2)
+        self.patch = self.extract_patch(state, self.patch_size)
+        self.rays = get_ray_lengths(self.patch, ray_conf=self.ray_conf, 
+                                    start_allowance=3, max_len=self.patch_size)
+        local_dist = 30
+        min_space = 3
+        self.local_rays = {k: min(v, local_dist) for k, v in self.rays.items()}
+        left_min = min([self.local_rays[kk] for kk in ['W', 'NW']])
+        right_min = min([self.local_rays[kk] for kk in ['E', 'NE']])
+        if left_min < min_space:
+            self.action_message = 'AVOID LEFT'
+            return 2
+        if right_min < min_space:
+            self.action_message = 'AVOID RIGHT'
+            return 0
+        straight_better_left = self.local_rays['N'] >= left_min
+        straight_better_right = self.local_rays['N'] >= right_min
+        if straight_better_left and straight_better_right:
+            self.action_message = 'BETTER GO STRAIGHT'
+            return 1
+        self.rays = {kk: max(0, vv-self.turning_distance)
+                     for kk, vv in self.rays.items()}
+        left = ['SW', 'W', 'NW']
+        right = ['SE', 'E', 'NE']
+        left_sum = sum([self.rays[kk] for kk in left])
+        right_sum = sum([self.rays[kk] for kk in right])
+        if left_sum < right_sum:
+            self.action_message = 'RIGHT'
+            return 2
+        else:
+            self.action_message = 'LEFT'
+            return 0
+
 
 
 if __name__ == '__main__':
-#    serveraddress = '129.215.91.49:8080'  # James' comp
+    serveraddress = '129.215.91.49:8080'  # James' comp
 #    serveraddress = "127.0.0.1:8080"  # Ryan's setting
-    serveraddress = "www.curvytron.com:80"  # Online
-    room = "THE BOT ROOM"
+#    serveraddress = "www.curvytron.com:80"  # Online
+    room = "THE BOT ROOM 2"
     
     print('server: {} room: {}'.format(serveraddress, room))
 
-    agent = RaymanAgent('Rayman', serveraddress, room, display=False)
+    agent = SimpleRaymanAgent('SimpleRayman', serveraddress, room, 
+                              display=True, display_patch=False)
 #    agent = RaymanAgent('RaymanAgent', server=serveraddress, room=room, 
 #                           display=True)
-    opponents = [HeuristicAgent1('HeuristicAgent1', serveraddress, room,
+    opponents = [RaymanAgent('Rayman', serveraddress, room),
+                 HeuristicAgent1('HeuristicAgent1', serveraddress, room,
                                  patch_size=60),
                  HeuristicAgent2('HeuristicAgent2_60', serveraddress, room,
                                  patch_size=60),
-                 HeuristicAgent2('HeuristicAgent2_100', serveraddress, room,
-                                 patch_size=100)]
+                 HeuristicAgent2('HeuristicAgent2_120', serveraddress, room,
+                                 patch_size=120)]
 
     agent.start()
     for op in opponents:
