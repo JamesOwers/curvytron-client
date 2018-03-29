@@ -301,7 +301,7 @@ class RaymanAgent(Agent):
 
 
 class SimpleRaymanAgent(Agent):
-    def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=199,
+    def __init__(self, name, server, room=DEFAULT_ROOM, patch_size=50,
                  turning_distance=10, display=False, display_patch=None,
                  **kwargs):
         super(SimpleRaymanAgent, self).__init__(name, server, room, **kwargs)
@@ -351,17 +351,9 @@ class SimpleRaymanAgent(Agent):
         self.patch = self.extract_patch(state, self.patch_size)
         self.rays = get_ray_lengths(self.patch, ray_conf=self.ray_conf, 
                                     start_allowance=3, max_len=self.patch_size)
-        local_dist = 30
-        min_space = 3
-        self.local_rays = {k: min(v, local_dist) for k, v in self.rays.items()}
-        left_min = min([self.local_rays[kk] for kk in ['W', 'NW']])
-        right_min = min([self.local_rays[kk] for kk in ['E', 'NE']])
-        if left_min < min_space:
-            self.action_message = 'AVOID LEFT'
-            return 2
-        if right_min < min_space:
-            self.action_message = 'AVOID RIGHT'
-            return 0
+        
+        left_min = min([self.rays[kk] for kk in ['W', 'NW']])
+        right_min = min([self.rays[kk] for kk in ['E', 'NE']])
         straight_better_left = self.local_rays['N'] >= left_min
         straight_better_right = self.local_rays['N'] >= right_min
         if straight_better_left and straight_better_right:
